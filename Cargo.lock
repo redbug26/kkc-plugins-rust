@@ -419,13 +419,14 @@ checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
 [[package]]
 name = "kkc-plugin-api"
 version = "0.1.0"
+source = "git+https://github.com/redbug26/kkc-rust?branch=main#5291efe9b32cb9d38abb87d6af4bfa5d5adc8da6"
 dependencies = [
  "abi_stable",
 ]
 
 [[package]]
 name = "kkc-remote-dropbox"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "abi_stable",
  "chrono",
