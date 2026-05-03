@@ -1,7 +1,7 @@
 [plugin]
 id = "onedrive"
 name = "OneDrive"
-version = "0.1.8"
+version = "0.1.9"
 type = "remote-rust"
 description = "OneDrive remote filesystem plugin for kkc-rust using Microsoft Graph"
 
