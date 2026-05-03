@@ -97,7 +97,7 @@ jobs:
           cp target/release/${{ matrix.plugin.lib_name }}.${{ matrix.target.lib_ext }} dist/${{ matrix.plugin.plugin_id }}/target/release/
           (cd dist/${{ matrix.plugin.plugin_id }} && zip -r ../../${{ matrix.plugin.plugin_id }}-${{ matrix.target.platform }}.zip .)
 
-        - name: Validate packaged plugin identity
+      - name: Validate packaged plugin identity
         run: |
           python3 - <<'PY'
           import subprocess
