@@ -1,0 +1,13 @@
+[plugin]
+id = "dropbox"
+name = "Dropbox"
+version = "0.1.0"
+type = "remote-rust"
+description = "Dropbox remote filesystem plugin for kkc-rust"
+
+[remote]
+library = "target/release/libkkc_remote_dropbox.dylib"
+
+[extra]
+api = "kkc-plugin-api/0.1"
+build = "env CARGO_TARGET_DIR=target cargo build --release"
