@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "kkc-remote-dropbox"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "abi_stable",
  "base64",
@@ -490,7 +490,7 @@ dependencies = [
 
 [[package]]
 name = "kkc-remote-onedrive"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "abi_stable",
  "chrono",
