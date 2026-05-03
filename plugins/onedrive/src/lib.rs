@@ -17,7 +17,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 const GRAPH_ROOT: &str = "https://graph.microsoft.com/v1.0/me/drive/root";
-const APP_KEY: &str = "147112ce-7425-47f2-9674-e1b7e6dbaa63";
+const APP_KEY: &str = "ff40b534-bf4e-42ca-b317-1b1f8e2bc4e6";
 const DEFAULT_SCOPES: &str = "offline_access Files.ReadWrite.All";
 
 #[derive(Debug, Deserialize)]
