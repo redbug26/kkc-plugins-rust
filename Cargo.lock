@@ -426,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "kkc-remote-dropbox"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "abi_stable",
  "chrono",
