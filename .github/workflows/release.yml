@@ -26,45 +26,44 @@ jobs:
       - name: Build dynamic plugin matrix
         id: discover
         run: |
-          plugins_json="$({
-            python3 <<'PY'
-            import json
-            import tomllib
-            from pathlib import Path
+          plugins_json="$(python3 - <<'PY'
+          import json
+          import tomllib
+          from pathlib import Path
 
-            plugins = []
-            plugins_root = Path("plugins")
-            if not plugins_root.exists():
-                raise SystemExit("plugins/ directory not found")
+          plugins = []
+          plugins_root = Path("plugins")
+          if not plugins_root.exists():
+            raise SystemExit("plugins/ directory not found")
 
-            for plugin_dir in sorted(plugins_root.iterdir()):
-                if not plugin_dir.is_dir():
-                    continue
+          for plugin_dir in sorted(plugins_root.iterdir()):
+            if not plugin_dir.is_dir():
+              continue
 
-                cargo_toml = plugin_dir / "Cargo.toml"
-                plugin_toml = plugin_dir / "plugin.toml"
-                if not cargo_toml.exists() or not plugin_toml.exists():
-                    continue
+            cargo_toml = plugin_dir / "Cargo.toml"
+            plugin_toml = plugin_dir / "plugin.toml"
+            if not cargo_toml.exists() or not plugin_toml.exists():
+              continue
 
-                cargo_data = tomllib.loads(cargo_toml.read_text(encoding="utf-8"))
-                crate_name = cargo_data.get("package", {}).get("name")
-                if not crate_name:
-                    raise SystemExit(f"Missing package.name in {cargo_toml}")
+            cargo_data = tomllib.loads(cargo_toml.read_text(encoding="utf-8"))
+            crate_name = cargo_data.get("package", {}).get("name")
+            if not crate_name:
+              raise SystemExit(f"Missing package.name in {cargo_toml}")
 
-                plugins.append(
-                    {
-                        "plugin_id": plugin_dir.name,
-                        "crate_name": crate_name,
-                        "lib_name": f"lib{crate_name.replace('-', '_')}",
-                    }
-                )
+            plugins.append(
+              {
+                "plugin_id": plugin_dir.name,
+                "crate_name": crate_name,
+                "lib_name": f"lib{crate_name.replace('-', '_')}",
+              }
+            )
 
-            if not plugins:
-                raise SystemExit("No releasable plugins found under plugins/")
+          if not plugins:
+            raise SystemExit("No releasable plugins found under plugins/")
 
-            print(json.dumps(plugins))
-            PY
-          })"
+          print(json.dumps(plugins))
+          PY
+          )"
 
           echo "Detected plugins: ${plugins_json}"
           echo "plugins=${plugins_json}" >> "$GITHUB_OUTPUT"
