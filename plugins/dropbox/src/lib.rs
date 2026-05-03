@@ -62,7 +62,7 @@ extern "C" fn metadata() -> RemotePluginMetadata {
     RemotePluginMetadata {
         id: "dropbox".into(),
         name: "Dropbox".into(),
-        version: "0.1.4".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
         description: "Dropbox remote filesystem".into(),
         scheme: "dropbox".into(),
         fields: vec![

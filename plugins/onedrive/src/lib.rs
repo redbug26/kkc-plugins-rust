@@ -64,7 +64,7 @@ extern "C" fn metadata() -> RemotePluginMetadata {
     RemotePluginMetadata {
         id: "onedrive".into(),
         name: "OneDrive".into(),
-        version: "0.1.1".into(),
+        version: env!("CARGO_PKG_VERSION").into(),
         description: "OneDrive remote filesystem using Microsoft Graph".into(),
         scheme: "onedrive".into(),
         fields: vec![

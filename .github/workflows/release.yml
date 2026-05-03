@@ -97,6 +97,44 @@ jobs:
           cp target/release/${{ matrix.plugin.lib_name }}.${{ matrix.target.lib_ext }} dist/${{ matrix.plugin.plugin_id }}/target/release/
           (cd dist/${{ matrix.plugin.plugin_id }} && zip -r ../../${{ matrix.plugin.plugin_id }}-${{ matrix.target.platform }}.zip .)
 
+        - name: Validate packaged plugin identity
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          import tomllib
+          import zipfile
+          from pathlib import Path
+
+          expected_id = "${{ matrix.plugin.plugin_id }}"
+          archive = Path(f"{expected_id}-${{ matrix.target.platform }}.zip")
+          if not archive.is_file():
+            raise SystemExit(f"Missing package archive: {archive}")
+
+          with zipfile.ZipFile(archive) as zf:
+            names = set(zf.namelist())
+            if "plugin.toml" not in names:
+              raise SystemExit(f"{archive}: plugin.toml missing")
+            manifest = tomllib.loads(zf.read("plugin.toml").decode("utf-8"))
+            manifest_id = manifest.get("plugin", {}).get("id", "")
+            if manifest_id != expected_id:
+              raise SystemExit(
+                f"{archive}: plugin.id='{manifest_id}' does not match expected '{expected_id}'"
+              )
+
+          lib_path = Path(
+            f"target/release/${{ matrix.plugin.lib_name }}.${{ matrix.target.lib_ext }}"
+          )
+          if not lib_path.is_file():
+            raise SystemExit(f"Built library missing: {lib_path}")
+
+          strings = subprocess.check_output(["strings", str(lib_path)], text=True, errors="ignore")
+          if expected_id not in strings:
+            raise SystemExit(
+              f"{lib_path}: expected plugin id '{expected_id}' not found in binary strings"
+            )
+          print(f"Validated plugin packaging identity for {expected_id}")
+          PY
+
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.plugin.plugin_id }}-${{ matrix.target.platform }}
