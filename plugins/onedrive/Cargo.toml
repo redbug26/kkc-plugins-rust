@@ -1,8 +1,8 @@
 [package]
-name = "kkc-remote-dropbox"
+name = "kkc-remote-onedrive"
 version = "0.1.4"
 edition = "2024"
-description = "Dropbox remote plugin for kkc-rust"
+description = "OneDrive remote plugin for kkc-rust"
 license = "MIT"
 
 [lib]
@@ -11,11 +11,8 @@ crate-type = ["cdylib"]
 [dependencies]
 abi_stable = "0.11.3"
 kkc-plugin-api = { git = "https://github.com/redbug26/kkc-rust", branch = "main", package = "kkc-plugin-api" }
-base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std"] }
-getrandom = "0.2"
 percent-encoding = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-sha2 = "0.10"
 ureq = { version = "2.12", default-features = false, features = ["tls", "native-tls"] }

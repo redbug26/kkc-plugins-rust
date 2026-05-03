@@ -3,20 +3,22 @@ use abi_stable::{
     prefix_type::PrefixTypeTrait,
     std_types::{RResult, RStr, RString, RVec},
 };
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use chrono::DateTime;
 use kkc_plugin_api::{
     KKC_REMOTE_PLUGIN_API_VERSION, RemoteConfigField, RemoteEntry, RemotePluginMetadata,
     RemotePluginMod, RemotePluginModRef, RemotePluginResult,
 };
-use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
 use std::sync::Mutex;
+
+const GRAPH_ROOT: &str = "https://graph.microsoft.com/v1.0/me/drive/root";
+const APP_KEY: &str = "b325403f-549c-4988-ba73-81d38df9ac4f";
+const DEFAULT_SCOPES: &str = "offline_access Files.ReadWrite.All";
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -29,9 +31,9 @@ struct Config {
     #[serde(default)]
     client_id: Option<String>,
     #[serde(default)]
-    app_secret: Option<String>,
+    tenant: Option<String>,
     #[serde(default)]
-    redirect_uri: Option<String>,
+    scopes: Option<String>,
 }
 
 static DEBUG_LOGGER: Mutex<Option<usize>> = Mutex::new(None);
@@ -60,16 +62,16 @@ extern "C" fn api_version() -> u32 {
 
 extern "C" fn metadata() -> RemotePluginMetadata {
     RemotePluginMetadata {
-        id: "dropbox".into(),
-        name: "Dropbox".into(),
-        version: "0.1.4".into(),
-        description: "Dropbox remote filesystem".into(),
-        scheme: "dropbox".into(),
+        id: "onedrive".into(),
+        name: "OneDrive".into(),
+        version: "0.1.1".into(),
+        description: "OneDrive remote filesystem using Microsoft Graph".into(),
+        scheme: "onedrive".into(),
         fields: vec![
-            RemoteConfigField::new("app_key", "App key", false, true, ""),
+            RemoteConfigField::new("app_key", "App key", false, true, APP_KEY),
             RemoteConfigField::new("refresh_token", "Refresh token", true, true, ""),
-            RemoteConfigField::new("app_secret", "App secret", true, false, ""),
-            RemoteConfigField::new("redirect_uri", "Redirect URI", false, false, ""),
+            RemoteConfigField::new("tenant", "Tenant", false, false, "common"),
+            RemoteConfigField::new("scopes", "Scopes", false, false, DEFAULT_SCOPES),
             RemoteConfigField::new("access_token", "Access token (legacy)", true, false, ""),
         ]
         .into(),
@@ -94,40 +96,27 @@ extern "C" fn list_dir(
     wrap(|| {
         let cfg = parse_config(config_json.as_str())?;
         let token = access_token(&cfg)?;
-        let path = dropbox_path(cwd.as_str());
-        let body = json!({ "path": path });
-        let response = api_post_json(
-            &token,
-            "https://api.dropboxapi.com/2/files/list_folder",
-            body,
-        )?;
+        let url = graph_item_url(cwd.as_str(), "children");
+        let response = api_get_json(&token, &url)?;
         let entries = response
-            .get("entries")
+            .get("value")
             .and_then(Value::as_array)
-            .ok_or_else(|| "Dropbox list_folder response has no entries".to_string())?;
+            .ok_or_else(|| "OneDrive children response has no value array".to_string())?;
         let mut out = Vec::new();
         for entry in entries {
             let name = entry.get("name").and_then(Value::as_str).unwrap_or("");
             if name.is_empty() || (!show_hidden && name.starts_with('.')) {
                 continue;
             }
-            let tag = entry.get(".tag").and_then(Value::as_str).unwrap_or("file");
+            let is_dir = entry.get("folder").is_some();
             let modified_unix = entry
-                .get("server_modified")
+                .get("lastModifiedDateTime")
                 .and_then(Value::as_str)
                 .and_then(parse_rfc3339_unix)
-                .or_else(|| {
-                    entry
-                        .get("client_modified")
-                        .and_then(Value::as_str)
-                        .and_then(parse_rfc3339_unix)
-                })
                 .unwrap_or(0);
-            // Build path by joining parent directory with entry name
-            // This ensures correct paths even for special/shared folders
             let path = join_remote(cwd.as_str(), name);
             debug_log(&format!(
-                "dropbox list_dir: cwd={}, name={}, joined_path={}",
+                "onedrive list_dir: cwd={}, name={}, joined_path={}",
                 cwd.as_str(),
                 name,
                 &path
@@ -135,11 +124,11 @@ extern "C" fn list_dir(
             out.push(RemoteEntry {
                 name: name.into(),
                 path: path.into(),
-                is_dir: tag == "folder",
+                is_dir,
                 is_symlink: false,
                 size: entry.get("size").and_then(Value::as_u64).unwrap_or(0),
                 modified_unix,
-                mode: if tag == "folder" { 0o755 } else { 0o644 },
+                mode: if is_dir { 0o755 } else { 0o644 },
             });
         }
         out.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
@@ -155,7 +144,7 @@ extern "C" fn download_into_dir(
 ) -> RemotePluginResult<RString> {
     wrap(|| {
         if recursive {
-            return Err("Dropbox directory download is not implemented yet".to_string());
+            return Err("OneDrive directory download is not implemented yet".to_string());
         }
         let cfg = parse_config(config_json.as_str())?;
         let token = access_token(&cfg)?;
@@ -165,10 +154,8 @@ extern "C" fn download_into_dir(
             .and_then(|name| name.to_str())
             .ok_or_else(|| "remote path has no file name".to_string())?;
         let local = Path::new(local_dir.as_str()).join(name);
-        let arg = json!({ "path": dropbox_path(&remote) }).to_string();
-        let response = ureq::post("https://content.dropboxapi.com/2/files/download")
+        let response = ureq::get(&graph_item_url(&remote, "content"))
             .set("Authorization", &format!("Bearer {token}"))
-            .set("Dropbox-API-Arg", &arg)
             .call()
             .map_err(http_error)?;
         if let Some(parent) = local.parent() {
@@ -189,7 +176,7 @@ extern "C" fn upload_into_dir(
 ) -> RemotePluginResult<RString> {
     wrap(|| {
         if recursive {
-            return Err("Dropbox directory upload is not implemented yet".to_string());
+            return Err("OneDrive directory upload is not implemented yet".to_string());
         }
         let cfg = parse_config(config_json.as_str())?;
         let token = access_token(&cfg)?;
@@ -199,22 +186,13 @@ extern "C" fn upload_into_dir(
             .and_then(|name| name.to_str())
             .ok_or_else(|| "local path has no file name".to_string())?;
         let remote = join_remote(remote_dir.as_str(), name);
-        let arg = json!({
-            "path": dropbox_path(&remote),
-            "mode": "add",
-            "autorename": true,
-            "mute": false,
-            "strict_conflict": false
-        })
-        .to_string();
         let mut bytes = Vec::new();
         fs::File::open(local)
             .map_err(|err| err.to_string())?
             .read_to_end(&mut bytes)
             .map_err(|err| err.to_string())?;
-        ureq::post("https://content.dropboxapi.com/2/files/upload")
+        ureq::put(&graph_item_url(&remote, "content"))
             .set("Authorization", &format!("Bearer {token}"))
-            .set("Dropbox-API-Arg", &arg)
             .set("Content-Type", "application/octet-stream")
             .send_bytes(&bytes)
             .map_err(http_error)?;
@@ -230,11 +208,10 @@ extern "C" fn delete_path(
     wrap(|| {
         let cfg = parse_config(config_json.as_str())?;
         let token = access_token(&cfg)?;
-        api_post_json(
-            &token,
-            "https://api.dropboxapi.com/2/files/delete_v2",
-            json!({ "path": dropbox_path(remote_path.as_str()) }),
-        )?;
+        ureq::delete(&graph_item_url(remote_path.as_str(), ""))
+            .set("Authorization", &format!("Bearer {token}"))
+            .call()
+            .map_err(http_error)?;
         Ok(())
     })
 }
@@ -243,10 +220,23 @@ extern "C" fn make_dir(config_json: RStr<'_>, remote_path: RStr<'_>) -> RemotePl
     wrap(|| {
         let cfg = parse_config(config_json.as_str())?;
         let token = access_token(&cfg)?;
+        let remote = normalize_path(remote_path.as_str());
+        let name = Path::new(&remote)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| "remote path has no folder name".to_string())?;
+        let parent = Path::new(&remote)
+            .parent()
+            .and_then(|parent| parent.to_str())
+            .unwrap_or("/");
         api_post_json(
             &token,
-            "https://api.dropboxapi.com/2/files/create_folder_v2",
-            json!({ "path": dropbox_path(remote_path.as_str()), "autorename": false }),
+            &graph_item_url(parent, "children"),
+            json!({
+                "name": name,
+                "folder": {},
+                "@microsoft.graph.conflictBehavior": "fail"
+            }),
         )?;
         Ok(())
     })
@@ -255,80 +245,76 @@ extern "C" fn make_dir(config_json: RStr<'_>, remote_path: RStr<'_>) -> RemotePl
 extern "C" fn auth_start(config_json: RStr<'_>) -> RemotePluginResult<RString> {
     wrap(|| {
         let cfg = parse_partial_config(config_json.as_str())?;
-        let app_key =
-            dropbox_client_id(&cfg).ok_or_else(|| "Dropbox app_key is required".to_string())?;
-        let code_verifier = pkce_code_verifier()?;
-        let code_challenge = pkce_code_challenge(&code_verifier);
-        let mut params = vec![
-            ("client_id", app_key),
-            ("response_type", "code"),
-            ("token_access_type", "offline"),
-            ("code_challenge", code_challenge.as_str()),
-            ("code_challenge_method", "S256"),
-        ];
-        if let Some(redirect_uri) = optional_value(cfg.redirect_uri.as_deref()) {
-            params.push(("redirect_uri", redirect_uri));
-        }
-        let auth_url = format!(
-            "https://www.dropbox.com/oauth2/authorize?{}",
-            form_urlencoded(&params)
-        );
-        Ok(json!({
-            "type": "authorization_code_pkce",
-            "auth_url": auth_url,
-            "instructions": "Open auth_url, authorize Dropbox, then paste the returned code into auth_complete input.",
-            "code_verifier": code_verifier,
-            "redirect_uri": optional_value(cfg.redirect_uri.as_deref()),
-        })
-        .to_string()
-        .into())
+        let client_id =
+            onedrive_client_id(&cfg).ok_or_else(|| "OneDrive app_key is required".to_string())?;
+        let tenant = optional_value(cfg.tenant.as_deref()).unwrap_or("common");
+        let scopes = optional_value(cfg.scopes.as_deref()).unwrap_or(DEFAULT_SCOPES);
+        let body = form_urlencoded(&[("client_id", client_id), ("scope", scopes)]);
+        let response = ureq::post(&format!(
+            "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode"
+        ))
+        .set("Content-Type", "application/x-www-form-urlencoded")
+        .send_string(&body)
+        .map_err(http_error)?;
+        let text = response.into_string().map_err(|err| err.to_string())?;
+        let mut session = serde_json::from_str::<Value>(&text).map_err(|err| err.to_string())?;
+        session["type"] = json!("device_code");
+        session["tenant"] = json!(tenant);
+        session["client_id"] = json!(client_id);
+        session["scopes"] = json!(scopes);
+        Ok(session.to_string().into())
     })
 }
 
 extern "C" fn auth_complete(
-    config_json: RStr<'_>,
+    _config_json: RStr<'_>,
     auth_session_json: RStr<'_>,
-    input: RStr<'_>,
+    _input: RStr<'_>,
 ) -> RemotePluginResult<RString> {
     wrap(|| {
-        let cfg = parse_partial_config(config_json.as_str())?;
-        let app_key =
-            dropbox_client_id(&cfg).ok_or_else(|| "Dropbox app_key is required".to_string())?;
         let session = serde_json::from_str::<Value>(auth_session_json.as_str())
             .map_err(|err| err.to_string())?;
-        let code_verifier = session
-            .get("code_verifier")
+        let device_code = session
+            .get("device_code")
             .and_then(Value::as_str)
-            .ok_or_else(|| "Dropbox auth session has no code_verifier".to_string())?;
-        let code = extract_oauth_code(input.as_str())?;
-        let mut form = vec![
-            ("grant_type", "authorization_code"),
-            ("code", code.as_str()),
-            ("client_id", app_key),
-            ("code_verifier", code_verifier),
-        ];
-        if let Some(redirect_uri) = optional_value(cfg.redirect_uri.as_deref()) {
-            form.push(("redirect_uri", redirect_uri));
-        }
-        let body = form_urlencoded(&form);
-        let response = ureq::post("https://api.dropbox.com/oauth2/token")
-            .set("Content-Type", "application/x-www-form-urlencoded")
-            .send_string(&body)
-            .map_err(http_error)?;
+            .ok_or_else(|| "OneDrive auth session has no device_code".to_string())?;
+        let client_id = session
+            .get("client_id")
+            .and_then(Value::as_str)
+            .unwrap_or(APP_KEY);
+        let tenant = session
+            .get("tenant")
+            .and_then(Value::as_str)
+            .unwrap_or("common");
+        let scopes = session
+            .get("scopes")
+            .and_then(Value::as_str)
+            .unwrap_or(DEFAULT_SCOPES);
+        let body = form_urlencoded(&[
+            ("client_id", client_id),
+            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
+            ("device_code", device_code),
+        ]);
+        let response = ureq::post(&format!(
+            "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+        ))
+        .set("Content-Type", "application/x-www-form-urlencoded")
+        .send_string(&body)
+        .map_err(http_error)?;
         let text = response.into_string().map_err(|err| err.to_string())?;
         let token_json = serde_json::from_str::<Value>(&text).map_err(|err| err.to_string())?;
         let refresh_token = token_json
             .get("refresh_token")
             .and_then(Value::as_str)
-            .ok_or_else(|| "Dropbox token response has no refresh_token".to_string())?;
-        let mut out = json!({
-            "app_key": app_key,
+            .ok_or_else(|| "OneDrive token response has no refresh_token".to_string())?;
+        Ok(json!({
+            "app_key": client_id,
             "refresh_token": refresh_token,
-        });
-        if let Some(redirect_uri) = optional_value(cfg.redirect_uri.as_deref()) {
-            out["redirect_uri"] = json!(redirect_uri);
-        }
-        Ok(out.to_string().into())
+            "tenant": tenant,
+            "scopes": scopes,
+        })
+        .to_string()
+        .into())
     })
 }
 
@@ -345,10 +331,10 @@ fn parse_config(raw: &str) -> Result<Config, String> {
         return Ok(cfg);
     }
     if optional_value(cfg.refresh_token.as_deref()).is_none() {
-        return Err("Dropbox refresh_token is required".to_string());
+        return Err("OneDrive refresh_token is required".to_string());
     }
-    if dropbox_client_id(&cfg).is_none() {
-        return Err("Dropbox app_key is required".to_string());
+    if onedrive_client_id(&cfg).is_none() {
+        return Err("OneDrive app_key is required".to_string());
     }
     Ok(cfg)
 }
@@ -370,29 +356,39 @@ fn access_token(cfg: &Config) -> Result<String, String> {
 
 fn refresh_access_token(cfg: &Config) -> Result<String, String> {
     let refresh_token = optional_value(cfg.refresh_token.as_deref())
-        .ok_or_else(|| "Dropbox refresh_token is required".to_string())?;
-    let app_key =
-        dropbox_client_id(cfg).ok_or_else(|| "Dropbox app_key is required".to_string())?;
-    let mut form = vec![
+        .ok_or_else(|| "OneDrive refresh_token is required".to_string())?;
+    let client_id =
+        onedrive_client_id(cfg).ok_or_else(|| "OneDrive app_key is required".to_string())?;
+    let tenant = optional_value(cfg.tenant.as_deref()).unwrap_or("common");
+    let scopes = optional_value(cfg.scopes.as_deref()).unwrap_or(DEFAULT_SCOPES);
+    let body = form_urlencoded(&[
+        ("client_id", client_id),
         ("grant_type", "refresh_token"),
         ("refresh_token", refresh_token),
-        ("client_id", app_key),
-    ];
-    if let Some(secret) = optional_value(cfg.app_secret.as_deref()) {
-        form.push(("client_secret", secret));
-    }
-    let body = form_urlencoded(&form);
-    let response = ureq::post("https://api.dropbox.com/oauth2/token")
-        .set("Content-Type", "application/x-www-form-urlencoded")
-        .send_string(&body)
-        .map_err(http_error)?;
+        ("scope", scopes),
+    ]);
+    let response = ureq::post(&format!(
+        "https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"
+    ))
+    .set("Content-Type", "application/x-www-form-urlencoded")
+    .send_string(&body)
+    .map_err(http_error)?;
     let text = response.into_string().map_err(|err| err.to_string())?;
     let json = serde_json::from_str::<Value>(&text).map_err(|err| err.to_string())?;
     json.get("access_token")
         .and_then(Value::as_str)
         .filter(|token| !token.trim().is_empty())
         .map(str::to_string)
-        .ok_or_else(|| "Dropbox token response has no access_token".to_string())
+        .ok_or_else(|| "OneDrive token response has no access_token".to_string())
+}
+
+fn api_get_json(token: &str, url: &str) -> Result<Value, String> {
+    let response = ureq::get(url)
+        .set("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map_err(http_error)?;
+    let text = response.into_string().map_err(|err| err.to_string())?;
+    serde_json::from_str::<Value>(&text).map_err(|err| err.to_string())
 }
 
 fn api_post_json(token: &str, url: &str, body: Value) -> Result<Value, String> {
@@ -405,8 +401,10 @@ fn api_post_json(token: &str, url: &str, body: Value) -> Result<Value, String> {
     serde_json::from_str::<Value>(&text).map_err(|err| err.to_string())
 }
 
-fn dropbox_client_id(cfg: &Config) -> Option<&str> {
-    optional_value(cfg.app_key.as_deref()).or_else(|| optional_value(cfg.client_id.as_deref()))
+fn onedrive_client_id(cfg: &Config) -> Option<&str> {
+    optional_value(cfg.app_key.as_deref())
+        .or_else(|| optional_value(cfg.client_id.as_deref()))
+        .or(Some(APP_KEY))
 }
 
 fn optional_value(value: Option<&str>) -> Option<&str> {
@@ -427,44 +425,12 @@ fn form_urlencoded(fields: &[(&str, &str)]) -> String {
         .join("&")
 }
 
-fn pkce_code_verifier() -> Result<String, String> {
-    let mut bytes = [0_u8; 32];
-    getrandom::getrandom(&mut bytes).map_err(|err| err.to_string())?;
-    Ok(URL_SAFE_NO_PAD.encode(bytes))
-}
-
-fn pkce_code_challenge(code_verifier: &str) -> String {
-    URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()))
-}
-
-fn extract_oauth_code(input: &str) -> Result<String, String> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return Err("OAuth code is required".to_string());
-    }
-    if let Some(query_start) = trimmed.find('?') {
-        let query = &trimmed[query_start + 1..];
-        for pair in query.split('&') {
-            let mut parts = pair.splitn(2, '=');
-            let key = parts.next().unwrap_or("");
-            let value = parts.next().unwrap_or("");
-            if key == "code" {
-                return percent_decode_str(value)
-                    .decode_utf8()
-                    .map(|value| value.to_string())
-                    .map_err(|err| err.to_string());
-            }
-        }
-    }
-    Ok(trimmed.to_string())
-}
-
 fn http_error(err: ureq::Error) -> String {
     match err {
         ureq::Error::Status(code, response) => {
             let mut body = String::new();
             let _ = response.into_reader().read_to_string(&mut body);
-            format!("Dropbox HTTP {code}: {body}")
+            format!("OneDrive HTTP {code}: {body}")
         }
         ureq::Error::Transport(err) => err.to_string(),
     }
@@ -479,13 +445,27 @@ fn normalize_path(path: &str) -> String {
     }
 }
 
-fn dropbox_path(path: &str) -> String {
+fn graph_item_url(path: &str, suffix: &str) -> String {
     let normalized = normalize_path(path);
-    if normalized == "/" {
-        String::new()
-    } else {
-        normalized
+    let suffix = suffix.trim_matches('/');
+    match (normalized.as_str(), suffix.is_empty()) {
+        ("/", true) => GRAPH_ROOT.to_string(),
+        ("/", false) => format!("{GRAPH_ROOT}/{suffix}"),
+        (_, true) => format!("{GRAPH_ROOT}:{}:", encode_graph_path(&normalized)),
+        (_, false) => format!("{GRAPH_ROOT}:{}:/{suffix}", encode_graph_path(&normalized)),
     }
+}
+
+fn encode_graph_path(path: &str) -> String {
+    normalize_path(path)
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .map(|part| utf8_percent_encode(part, NON_ALPHANUMERIC).to_string())
+        .fold(String::new(), |mut acc, part| {
+            acc.push('/');
+            acc.push_str(&part);
+            acc
+        })
 }
 
 fn join_remote(parent: &str, name: &str) -> String {

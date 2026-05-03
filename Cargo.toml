@@ -1,5 +1,6 @@
 [workspace]
 members = [
     "plugins/dropbox",
+    "plugins/onedrive",
 ]
 resolver = "2"
