@@ -1,7 +1,7 @@
 [plugin]
 id = "dropbox"
 name = "Dropbox"
-version = "0.1.9"
+version = "0.1.10"
 type = "remote-rust"
 description = "Dropbox remote filesystem plugin for kkc-rust"
 
