@@ -1,0 +1,13 @@
+[plugin]
+id = "xlsx"
+name = "XLSX Viewer"
+version = "0.1.0"
+type = "viewer-rust"
+description = "XLSX file viewer plugin for kkc-rust"
+
+[viewer]
+library = "target/release/libkkc_viewer_xlsx.dylib"
+
+[extra]
+api = "kkc-plugin-api/0.1"
+build = "env CARGO_TARGET_DIR=target cargo build --release"

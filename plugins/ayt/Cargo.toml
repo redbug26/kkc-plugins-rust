@@ -1,0 +1,20 @@
+[package]
+name = "kkc-viewer-ayt"
+version = "0.1.0"
+edition = "2024"
+description = "AYT chiptune viewer plugin for kkc-rust"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+abi_stable = "0.11.3"
+kkc-plugin-api = { path = "../../../kkc-rust/crates/kkc-plugin-api" }
+
+[profile.release]
+opt-level = "z"
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

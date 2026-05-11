@@ -1,6 +1,11 @@
 [workspace]
 members = [
+    "plugins/ayt",
+    "plugins/ym",
     "plugins/dropbox",
     "plugins/onedrive",
+    "plugins/xlsx",
+    "plugins/epub",
+    "plugins/pdf",
 ]
 resolver = "2"

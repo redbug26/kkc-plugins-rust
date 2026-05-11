@@ -1,0 +1,13 @@
+[plugin]
+id = "pdf"
+name = "PDF Viewer"
+version = "0.1.0"
+type = "viewer-rust"
+description = "PDF viewer plugin for kkc-rust (MuPDF text extraction)"
+
+[viewer]
+library = "target/release/libkkc_viewer_pdf.dylib"
+
+[extra]
+api = "kkc-plugin-api/0.1"
+build = "env CARGO_TARGET_DIR=target cargo build --release"

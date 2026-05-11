@@ -1,0 +1,23 @@
+[package]
+name = "kkc-viewer-xlsx"
+version = "0.1.0"
+edition = "2024"
+description = "XLSX viewer plugin for kkc-rust"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+abi_stable = "0.11.3"
+calamine = "0.31"
+kkc-plugin-api = { path = "../../../kkc-rust/crates/kkc-plugin-api" }
+serde_json = "1"
+unicode-width = "0.2"
+
+[profile.release]
+opt-level = "z"
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"

@@ -1,0 +1,13 @@
+[plugin]
+id = "ayt"
+name = "AYT Decoder"
+version = "0.1.0"
+type = "audio-rust"
+description = "AYT decoder plugin streaming PCM and playback metadata to kkc-rust"
+
+[audio]
+library = "target/release/libkkc_viewer_ayt.dylib"
+
+[extra]
+api = "kkc-plugin-api/0.1"
+build = "env CARGO_TARGET_DIR=target cargo build --release"
