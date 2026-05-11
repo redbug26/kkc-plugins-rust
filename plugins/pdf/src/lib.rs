@@ -294,15 +294,13 @@ extern "C" fn render_document(
         let mut status: Vec<ViewerSpan> = Vec::new();
         status.push(sp("PDF", "yellow", true));
         status.push(sp(format!("  {filename}"), "lightcyan", false));
-        status.push(sp(
-            format!("  page {}/{}", page + 1, total),
-            "cyan",
-            false,
-        ));
+        status.push(sp(format!("  page {}/{}", page + 1, total), "cyan", false));
         status.push(sp("  [tab/[/]] page", "darkgray", false));
 
         let mut out: Vec<ViewerLine> = Vec::new();
-        out.push(ViewerLine { spans: status.into() });
+        out.push(ViewerLine {
+            spans: status.into(),
+        });
         out.push(blank_line());
 
         // Body lines with subtle line-number column
@@ -312,11 +310,17 @@ extern "C" fn render_document(
                 vec![sp("", "white", false)]
             } else {
                 vec![
-                    sp(format!("{:>w$}│ ", i + 1, w = lineno_w - 2), "darkgray", false),
+                    sp(
+                        format!("{:>w$}│ ", i + 1, w = lineno_w - 2),
+                        "darkgray",
+                        false,
+                    ),
                     sp(line.as_str(), "white", false),
                 ]
             };
-            out.push(ViewerLine { spans: spans.into() });
+            out.push(ViewerLine {
+                spans: spans.into(),
+            });
         }
 
         if wrapped.is_empty() {
@@ -337,7 +341,9 @@ extern "C" fn render_document(
         } else {
             footer.push(sp("  ── end of document ──", "darkgray", false));
         }
-        out.push(ViewerLine { spans: footer.into() });
+        out.push(ViewerLine {
+            spans: footer.into(),
+        });
 
         Ok(out.into())
     })
@@ -356,7 +362,7 @@ extern "C" fn render_document_image(
         let state = parse_state(state_json.as_str());
         let page = state_u(&state, "page", 0);
         let path_str = path.as_str();
-        
+
         let total = page_count(path_str);
         if total == 0 {
             return Err("Cannot open PDF or document is empty".into());
@@ -368,7 +374,7 @@ extern "C" fn render_document_image(
         let mupdf_page = doc
             .load_page(page as i32)
             .map_err(|e| format!("mupdf load page {page}: {e}"))?;
-        
+
         // Get page bounds
         let bounds = mupdf_page
             .bounds()
@@ -389,7 +395,7 @@ extern "C" fn render_document_image(
         // Render to pixmap using page.to_pixmap()
         let display_w = (page_w * scale).ceil() as u32;
         let display_h = (page_h * scale).ceil() as u32;
-        
+
         let rgb = Colorspace::device_rgb();
         let matrix = Matrix::new_scale(scale, scale);
         let pixmap = mupdf_page
@@ -405,7 +411,7 @@ extern "C" fn render_document_image(
         let pix_height = pixmap.height() as usize;
         let stride = pixmap.stride() as usize;
         let samples = pixmap.samples();
-        
+
         let mut rgb_data = Vec::with_capacity(pix_width * pix_height * 3);
         for y in 0..pix_height {
             let row_start = y * stride;
@@ -422,7 +428,7 @@ extern "C" fn render_document_image(
                 }
             }
         }
-        
+
         // Encode as base64
         let encoded = base64::engine::general_purpose::STANDARD.encode(&rgb_data);
 
@@ -434,14 +440,12 @@ extern "C" fn render_document_image(
         let mut status: Vec<ViewerSpan> = Vec::new();
         status.push(sp("PDF", "yellow", true));
         status.push(sp(format!("  {filename}"), "lightcyan", false));
-        status.push(sp(
-            format!("  page {}/{}", page + 1, total),
-            "cyan",
-            false,
-        ));
+        status.push(sp(format!("  page {}/{}", page + 1, total), "cyan", false));
         status.push(sp("  [tab/[/]] page", "darkgray", false));
 
-        let overlay_lines = vec![ViewerLine { spans: status.into() }];
+        let overlay_lines = vec![ViewerLine {
+            spans: status.into(),
+        }];
 
         Ok(ViewerDocumentImage {
             image: ViewerImage {
@@ -517,11 +521,18 @@ fn state_u(state: &Map<String, Value>, key: &str, default: usize) -> usize {
 }
 
 fn sp(text: impl Into<String>, fg: &str, bold: bool) -> ViewerSpan {
-    ViewerSpan { text: text.into().into(), fg: fg.into(), bg: "".into(), bold }
+    ViewerSpan {
+        text: text.into().into(),
+        fg: fg.into(),
+        bg: "".into(),
+        bold,
+    }
 }
 
 fn blank_line() -> ViewerLine {
-    ViewerLine { spans: vec![sp("", "white", false)].into() }
+    ViewerLine {
+        spans: vec![sp("", "white", false)].into(),
+    }
 }
 
 fn error_lines(msg: &str) -> RVec<ViewerLine> {

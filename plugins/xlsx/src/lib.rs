@@ -5,8 +5,8 @@ use abi_stable::{
 };
 use calamine::{Data, Reader, open_workbook_auto};
 use kkc_plugin_api::{
-    KKC_VIEWER_PLUGIN_API_VERSION, ViewerDocumentImage, ViewerHandleKeyResult, ViewerLine, ViewerPluginMetadata,
-    ViewerPluginMod, ViewerPluginModRef, ViewerPluginResult, ViewerSpan,
+    KKC_VIEWER_PLUGIN_API_VERSION, ViewerDocumentImage, ViewerHandleKeyResult, ViewerLine,
+    ViewerPluginMetadata, ViewerPluginMod, ViewerPluginModRef, ViewerPluginResult, ViewerSpan,
 };
 use serde_json::{Map, Value};
 use std::cmp;
@@ -72,7 +72,11 @@ fn truncate(s: &str, width: usize) -> String {
         let ch = chars[i];
         // simulate disp_w for one char (including VS16 lookahead)
         let cw = if ch == '\u{FE0F}' {
-            if i > 0 && UnicodeWidthChar::width(chars[i - 1]).unwrap_or(0) < 2 { 1 } else { 0 }
+            if i > 0 && UnicodeWidthChar::width(chars[i - 1]).unwrap_or(0) < 2 {
+                1
+            } else {
+                0
+            }
         } else {
             UnicodeWidthChar::width(ch).unwrap_or(0)
         };
@@ -85,7 +89,8 @@ fn truncate(s: &str, width: usize) -> String {
     }
     out.push('…');
     out
-}fn pad_right(s: &str, width: usize) -> String {
+}
+fn pad_right(s: &str, width: usize) -> String {
     let t = truncate(s, width);
     let w = disp_w(&t);
     if w >= width {
@@ -116,9 +121,8 @@ fn fit_widths(widths: &[usize], max_w: usize) -> Vec<usize> {
     if n == 0 {
         return vec![];
     }
-    let total = |r: &[usize]| -> usize {
-        r.iter().sum::<usize>() + n.saturating_sub(1) * COL_SEP_W
-    };
+    let total =
+        |r: &[usize]| -> usize { r.iter().sum::<usize>() + n.saturating_sub(1) * COL_SEP_W };
     let mut r = widths.to_vec();
     while total(&r) > max_w {
         let (idx, &max_val) = r.iter().enumerate().max_by_key(|&(_, &v)| v).unwrap();
@@ -273,7 +277,6 @@ extern "C" fn render_document(
                 let short = truncate(name, 12);
                 status.push(sp(format!(" {} ", short), "darkgray", false));
             }
-
         }
         status.push(sp("  rows: ", "darkgray", false));
         status.push(sp(total_rows.to_string(), "cyan", false));
@@ -281,7 +284,12 @@ extern "C" fn render_document(
         status.push(sp(total_cols.to_string(), "cyan", false));
         if col_offset > 0 || total_cols > vis_cols + col_offset {
             status.push(sp(
-                format!("  col {}-{}/{}", col_offset + 1, col_offset + vis_cols, total_cols),
+                format!(
+                    "  col {}-{}/{}",
+                    col_offset + 1,
+                    col_offset + vis_cols,
+                    total_cols
+                ),
                 "lightyellow",
                 false,
             ));
@@ -294,7 +302,9 @@ extern "C" fn render_document(
         }
 
         let mut out: Vec<ViewerLine> = Vec::new();
-        out.push(ViewerLine { spans: status.into() });
+        out.push(ViewerLine {
+            spans: status.into(),
+        });
         out.push(ViewerLine {
             spans: vec![sp("", "white", false)].into(),
         });
@@ -331,7 +341,9 @@ extern "C" fn render_document(
                 spans.push(sp(padded, fg, is_header));
             }
 
-            out.push(ViewerLine { spans: spans.into() });
+            out.push(ViewerLine {
+                spans: spans.into(),
+            });
 
             // separator line after header
             if is_header {
@@ -373,9 +385,7 @@ extern "C" fn render_document_image(
     _width: u64,
     _height: u64,
 ) -> ViewerPluginResult<ViewerDocumentImage> {
-    wrap(|| {
-        Err("XLSX viewer does not support image rendering".into())
-    })
+    wrap(|| Err("XLSX viewer does not support image rendering".into()))
 }
 
 // ── key handling ──────────────────────────────────────────────────────────────
@@ -438,7 +448,10 @@ extern "C" fn handle_key(
         };
 
         state.insert("sheet".into(), Value::String(sheet.max(0).to_string()));
-        state.insert("col_offset".into(), Value::String(col_offset.max(0).to_string()));
+        state.insert(
+            "col_offset".into(),
+            Value::String(col_offset.max(0).to_string()),
+        );
 
         Ok(ViewerHandleKeyResult {
             consumed,

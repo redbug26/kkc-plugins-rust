@@ -5,9 +5,8 @@ use abi_stable::{
 };
 use epub::doc::EpubDoc;
 use kkc_plugin_api::{
-    KKC_VIEWER_PLUGIN_API_VERSION, ViewerDocumentImage, ViewerHandleKeyResult,
-    ViewerLine, ViewerPluginMetadata, ViewerPluginMod, ViewerPluginModRef, ViewerPluginResult,
-    ViewerSpan,
+    KKC_VIEWER_PLUGIN_API_VERSION, ViewerDocumentImage, ViewerHandleKeyResult, ViewerLine,
+    ViewerPluginMetadata, ViewerPluginMod, ViewerPluginModRef, ViewerPluginResult, ViewerSpan,
 };
 use serde_json::{Map, Value};
 use std::path::Path;
@@ -56,8 +55,8 @@ extern "C" fn render_document(
         let chapter = state_u(&state, "chapter", 0);
         let panel_w = if width >= 20 { width as usize } else { 80 };
 
-        let mut doc = EpubDoc::new(Path::new(path.as_str()))
-            .map_err(|e| format!("Cannot open EPUB: {e}"))?;
+        let mut doc =
+            EpubDoc::new(Path::new(path.as_str())).map_err(|e| format!("Cannot open EPUB: {e}"))?;
 
         let num_chapters = doc.spine.len();
         if num_chapters == 0 {
@@ -71,7 +70,10 @@ extern "C" fn render_document(
 
         // Extract title from metadata
         let book_title = doc.get_title().unwrap_or_else(|| "Unknown".to_string());
-        let author = doc.mdata("creator").map(|m| m.value.clone()).unwrap_or_default();
+        let author = doc
+            .mdata("creator")
+            .map(|m| m.value.clone())
+            .unwrap_or_default();
 
         // Get chapter content (HTML)
         let html = match doc.get_current_str() {
@@ -105,7 +107,9 @@ extern "C" fn render_document(
         }
 
         let mut out: Vec<ViewerLine> = Vec::new();
-        out.push(ViewerLine { spans: status.into() });
+        out.push(ViewerLine {
+            spans: status.into(),
+        });
         out.push(blank_line());
 
         // Skip redundant first-line heading (content already has H1)
@@ -200,10 +204,10 @@ extern "C" fn handle_key(
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum StyledLineType {
     Normal,
-    Heading(u8),      // level 1-6
-    Quote,            // blockquote
-    Code,             // code block
-    ListItem(usize),  // list item with indent level
+    Heading(u8),     // level 1-6
+    Quote,           // blockquote
+    Code,            // code block
+    ListItem(usize), // list item with indent level
 }
 
 struct StyledLine {
@@ -271,11 +275,7 @@ fn html_to_styled_lines(html: &str) -> Vec<StyledLine> {
     let mut entity_buf = String::new();
     let mut skip_stack: Vec<String> = Vec::new();
 
-    fn flush_line(
-        lines: &mut Vec<StyledLine>,
-        text: &mut String,
-        ty: &mut StyledLineType,
-    ) {
+    fn flush_line(lines: &mut Vec<StyledLine>, text: &mut String, ty: &mut StyledLineType) {
         if !text.is_empty() {
             let trimmed = text.trim().to_string();
             if !trimmed.is_empty() {
@@ -421,7 +421,12 @@ fn render_styled_line(styled: &StyledLine, max_w: usize) -> Vec<ViewerLine> {
                                 spans: vec![sp("", "white", false)].into(),
                             },
                             ViewerLine {
-                                spans: vec![sp(format!("  {}", line.to_uppercase()), "lightcyan", true)].into(),
+                                spans: vec![sp(
+                                    format!("  {}", line.to_uppercase()),
+                                    "lightcyan",
+                                    true,
+                                )]
+                                .into(),
                             },
                         ]
                         .into_iter()
@@ -431,11 +436,7 @@ fn render_styled_line(styled: &StyledLine, max_w: usize) -> Vec<ViewerLine> {
                     StyledLineType::Heading(2) => {
                         // H2: cyan bold with separator
                         ViewerLine {
-                            spans: vec![
-                                sp("  ", "darkgray", false),
-                                sp(line, "cyan", true),
-                            ]
-                            .into(),
+                            spans: vec![sp("  ", "darkgray", false), sp(line, "cyan", true)].into(),
                         }
                     }
                     StyledLineType::Heading(n) => {
@@ -453,21 +454,15 @@ fn render_styled_line(styled: &StyledLine, max_w: usize) -> Vec<ViewerLine> {
                     StyledLineType::Quote => {
                         // Blockquote: yellow, left-indented with │
                         ViewerLine {
-                            spans: vec![
-                                sp("  │ ", "yellow", false),
-                                sp(line, "yellow", false),
-                            ]
-                            .into(),
+                            spans: vec![sp("  │ ", "yellow", false), sp(line, "yellow", false)]
+                                .into(),
                         }
                     }
                     StyledLineType::Code => {
                         // Code block: gray mono-ish
                         ViewerLine {
-                            spans: vec![
-                                sp("  ", "darkgray", false),
-                                sp(line, "gray", false),
-                            ]
-                            .into(),
+                            spans: vec![sp("  ", "darkgray", false), sp(line, "gray", false)]
+                                .into(),
                         }
                     }
                     StyledLineType::ListItem(indent) => {
@@ -598,20 +593,23 @@ fn state_u(state: &Map<String, Value>, key: &str, default: usize) -> usize {
 }
 
 fn sp(text: impl Into<String>, fg: &str, bold: bool) -> ViewerSpan {
-    ViewerSpan { text: text.into().into(), fg: fg.into(), bg: "".into(), bold }
+    ViewerSpan {
+        text: text.into().into(),
+        fg: fg.into(),
+        bg: "".into(),
+        bold,
+    }
 }
 
 fn blank_line() -> ViewerLine {
-    ViewerLine { spans: vec![sp("", "white", false)].into() }
+    ViewerLine {
+        spans: vec![sp("", "white", false)].into(),
+    }
 }
 
 fn error_lines(msg: &str) -> RVec<ViewerLine> {
     vec![ViewerLine {
-        spans: vec![
-            sp("EPUB Viewer  ", "yellow", true),
-            sp(msg, "red", false),
-        ]
-        .into(),
+        spans: vec![sp("EPUB Viewer  ", "yellow", true), sp(msg, "red", false)].into(),
     }]
     .into()
 }

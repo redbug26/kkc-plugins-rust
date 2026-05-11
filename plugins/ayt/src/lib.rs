@@ -126,9 +126,12 @@ impl AyChip {
     }
 
     fn recalc_tone_periods(&mut self) {
-        self.tone_period[0] = ((self.regs[0] as i32) | (((self.regs[1] & 0x0F) as i32) << 8)).max(1);
-        self.tone_period[1] = ((self.regs[2] as i32) | (((self.regs[3] & 0x0F) as i32) << 8)).max(1);
-        self.tone_period[2] = ((self.regs[4] as i32) | (((self.regs[5] & 0x0F) as i32) << 8)).max(1);
+        self.tone_period[0] =
+            ((self.regs[0] as i32) | (((self.regs[1] & 0x0F) as i32) << 8)).max(1);
+        self.tone_period[1] =
+            ((self.regs[2] as i32) | (((self.regs[3] & 0x0F) as i32) << 8)).max(1);
+        self.tone_period[2] =
+            ((self.regs[4] as i32) | (((self.regs[5] & 0x0F) as i32) << 8)).max(1);
     }
 
     fn recalc_noise_period(&mut self) {
@@ -218,8 +221,16 @@ impl AyChip {
         let mut mix_r = 0.0f32;
 
         for ch in 0..3 {
-            let gate_tone = if ((self.regs[7] >> ch) & 1) == 0 { 1 } else { 0 };
-            let gate_noise = if ((self.regs[7] >> (ch + 3)) & 1) == 0 { 1 } else { 0 };
+            let gate_tone = if ((self.regs[7] >> ch) & 1) == 0 {
+                1
+            } else {
+                0
+            };
+            let gate_noise = if ((self.regs[7] >> (ch + 3)) & 1) == 0 {
+                1
+            } else {
+                0
+            };
 
             let mut chan_out = 1;
             if gate_tone == 1 {
@@ -247,7 +258,10 @@ impl AyChip {
             }
         }
 
-        ((mix_l * 0.6).clamp(-1.0, 1.0), (mix_r * 0.6).clamp(-1.0, 1.0))
+        (
+            (mix_l * 0.6).clamp(-1.0, 1.0),
+            (mix_r * 0.6).clamp(-1.0, 1.0),
+        )
     }
 }
 
@@ -345,7 +359,9 @@ impl Session {
     }
 
     fn snapshot(&self) -> AudioPlaybackSnapshot {
-        let frame = self.frame_cursor.min(self.song.frame_count.saturating_sub(1));
+        let frame = self
+            .frame_cursor
+            .min(self.song.frame_count.saturating_sub(1));
         let position_secs = if self.song.frame_rate == 0 {
             0.0
         } else {
@@ -440,7 +456,8 @@ extern "C" fn metadata() -> AudioPluginMetadata {
 
 extern "C" fn probe(path: RStr<'_>) -> AudioPluginResult<bool> {
     wrap(|| {
-        let bytes = std::fs::read(path.as_str()).map_err(|err| format!("Cannot read file: {err}"))?;
+        let bytes =
+            std::fs::read(path.as_str()).map_err(|err| format!("Cannot read file: {err}"))?;
         Ok(parse_ayt(&bytes).is_ok())
     })
 }
@@ -653,7 +670,10 @@ fn parse_ayt(bytes: &[u8]) -> Result<AytSong, String> {
     })
 }
 
-fn parse_init_values(bytes: &[u8], init_offset: usize) -> Result<([Option<u8>; 14], Vec<(u8, u8)>), String> {
+fn parse_init_values(
+    bytes: &[u8],
+    init_offset: usize,
+) -> Result<([Option<u8>; 14], Vec<(u8, u8)>), String> {
     let mut const_map = [None; 14];
     let mut values = Vec::new();
     let mut cursor = init_offset;
@@ -729,7 +749,10 @@ fn build_track_text_lines(song: &AytSong) -> Vec<String> {
     let mut out = vec![
         format!("AYT version {}.{}", song.version >> 4, song.version & 0x0F),
         format!("Platform: {} (id {})", song.platform_name, song.platform_id),
-        format!("Frame rate: {} Hz (code {})", song.frame_rate, song.frequency_code),
+        format!(
+            "Frame rate: {} Hz (code {})",
+            song.frame_rate, song.frequency_code
+        ),
         format!("Master clock: {:.0} Hz", song.master_clock_hz),
         format!("Pattern size: {} frames", song.pattern_size),
         format!("Sequence count: {}", song.sequence_count),
@@ -797,11 +820,8 @@ fn pseudo_spectrum(samples: &[f32], bands: usize) -> Vec<f32> {
             if start >= end {
                 0.0
             } else {
-                let avg = samples[start..end]
-                    .iter()
-                    .map(|v| v.abs())
-                    .sum::<f32>()
-                    / (end - start) as f32;
+                let avg =
+                    samples[start..end].iter().map(|v| v.abs()).sum::<f32>() / (end - start) as f32;
                 (avg * 2.5).min(1.0)
             }
         })

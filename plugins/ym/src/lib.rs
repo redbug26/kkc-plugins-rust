@@ -3,6 +3,7 @@ use abi_stable::{
     prefix_type::PrefixTypeTrait,
     std_types::{RResult, RStr, RString, RVec},
 };
+use delharc::decode::{Decoder, Lh5Decoder};
 use kkc_plugin_api::{
     AudioPcmChunk, AudioPlaybackSnapshot, AudioPluginMetadata, AudioPluginMod, AudioPluginModRef,
     AudioPluginResult, AudioTrackInfo, KKC_AUDIO_PLUGIN_API_VERSION,
@@ -108,9 +109,12 @@ impl YmChip {
     }
 
     fn recalc_tone_periods(&mut self) {
-        self.tone_period[0] = ((self.regs[0] as i32) | (((self.regs[1] & 0x0F) as i32) << 8)).max(1);
-        self.tone_period[1] = ((self.regs[2] as i32) | (((self.regs[3] & 0x0F) as i32) << 8)).max(1);
-        self.tone_period[2] = ((self.regs[4] as i32) | (((self.regs[5] & 0x0F) as i32) << 8)).max(1);
+        self.tone_period[0] =
+            ((self.regs[0] as i32) | (((self.regs[1] & 0x0F) as i32) << 8)).max(1);
+        self.tone_period[1] =
+            ((self.regs[2] as i32) | (((self.regs[3] & 0x0F) as i32) << 8)).max(1);
+        self.tone_period[2] =
+            ((self.regs[4] as i32) | (((self.regs[5] & 0x0F) as i32) << 8)).max(1);
     }
 
     fn recalc_noise_period(&mut self) {
@@ -200,8 +204,16 @@ impl YmChip {
         let mut mix_r = 0.0f32;
 
         for ch in 0..3 {
-            let gate_tone = if ((self.regs[7] >> ch) & 1) == 0 { 1 } else { 0 };
-            let gate_noise = if ((self.regs[7] >> (ch + 3)) & 1) == 0 { 1 } else { 0 };
+            let gate_tone = if ((self.regs[7] >> ch) & 1) == 0 {
+                1
+            } else {
+                0
+            };
+            let gate_noise = if ((self.regs[7] >> (ch + 3)) & 1) == 0 {
+                1
+            } else {
+                0
+            };
 
             let mut chan_out = 1;
             if gate_tone == 1 {
@@ -229,7 +241,10 @@ impl YmChip {
             }
         }
 
-        ((mix_l * 0.6).clamp(-1.0, 1.0), (mix_r * 0.6).clamp(-1.0, 1.0))
+        (
+            (mix_l * 0.6).clamp(-1.0, 1.0),
+            (mix_r * 0.6).clamp(-1.0, 1.0),
+        )
     }
 }
 
@@ -369,8 +384,7 @@ impl YmSession {
 
         AudioTrackInfo {
             name: name.into(),
-            format: format!("{}", std::str::from_utf8(&self.song.magic).unwrap_or("YM"))
-                .into(),
+            format: format!("{}", std::str::from_utf8(&self.song.magic).unwrap_or("YM")).into(),
             channels: 2,
             sample_rate: SAMPLE_RATE,
             duration_secs: self.song.duration_secs(),
@@ -425,17 +439,7 @@ extern "C" fn probe(path: RStr<'_>) -> AudioPluginResult<bool> {
     wrap(|| {
         let path_text = path.as_str().to_string();
         let bytes = std::fs::read(&path_text).map_err(|err| format!("Cannot read file: {err}"))?;
-        let parsed = parse_ym(&bytes);
-        match parsed {
-            Ok(_) => {
-                eprintln!("[kkc-audio-ym] probe ok: {}", path_text);
-                Ok(true)
-            }
-            Err(err) => {
-                eprintln!("[kkc-audio-ym] probe failed: {} ({})", path_text, err);
-                Ok(false)
-            }
-        }
+        Ok(parse_ym(&bytes).is_ok())
     })
 }
 
@@ -443,13 +447,9 @@ extern "C" fn open(path: RStr<'_>) -> AudioPluginResult<AudioTrackInfo> {
     wrap(|| {
         let path_text = path.as_str().to_string();
         let bytes = std::fs::read(&path_text).map_err(|err| format!("Cannot read file: {err}"))?;
-        let song = parse_ym(&bytes).map_err(|err| {
-            eprintln!("[kkc-audio-ym] open parse failed: {} ({})", path_text, err);
-            err
-        })?;
+        let song = parse_ym(&bytes)?;
         let session = YmSession::new(song);
         let info = session.info(&path_text);
-        eprintln!("[kkc-audio-ym] open ok: {}", path_text);
 
         let mut guard = sessions()
             .lock()
@@ -647,7 +647,9 @@ fn parse_ym_legacy(bytes: &[u8], magic: [u8; 4]) -> Result<YmSong, String> {
         }
         let frames = (payload_len - 4) / 14;
         let loop_bytes = &bytes[bytes.len() - 4..];
-        let loop_frame = u32::from_le_bytes([loop_bytes[0], loop_bytes[1], loop_bytes[2], loop_bytes[3]]) as usize;
+        let loop_frame =
+            u32::from_le_bytes([loop_bytes[0], loop_bytes[1], loop_bytes[2], loop_bytes[3]])
+                as usize;
         (frames, loop_frame)
     } else {
         (payload_len / 14, 0)
@@ -683,6 +685,9 @@ fn decompress_lzh(data: &[u8]) -> Result<Vec<u8>, String> {
     match decompress_lzh_strict(data) {
         Ok(out) => Ok(out),
         Err(strict_err) => {
+            if let Ok(out) = decompress_lzh_stsound_compat(data) {
+                return Ok(out);
+            }
             if let Some(repaired) = repair_lzh_level0_header_checksum(data) {
                 decompress_lzh_strict(&repaired).map_err(|retry_err| {
                     format!(
@@ -727,6 +732,66 @@ fn decompress_lzh_strict(data: &[u8]) -> Result<Vec<u8>, String> {
     Err("YM LZH archive has no decodable file entry".into())
 }
 
+fn decompress_lzh_stsound_compat(data: &[u8]) -> Result<Vec<u8>, String> {
+    if data.len() < 22 || data.get(2..7) != Some(b"-lh5-") {
+        return Err("Not an LH5 stream".into());
+    }
+
+    let header_size = data[0];
+    if header_size == 0 {
+        return Err("Not compressed".into());
+    }
+
+    let packed_size = u32::from_le_bytes([data[7], data[8], data[9], data[10]]) as usize;
+    let original_size = u32::from_le_bytes([data[11], data[12], data[13], data[14]]) as usize;
+    let level = data[20];
+    let name_len = data[21] as usize;
+    if original_size == 0 {
+        return Err("Empty LH5 output".into());
+    }
+    if level > 1 {
+        return Err("Unsupported LH5 header level".into());
+    }
+
+    let mut ptr = 22usize
+        .checked_add(name_len)
+        .and_then(|v| v.checked_add(2))
+        .ok_or_else(|| "LH5 header offset overflow".to_string())?;
+    if level == 1 {
+        ptr = ptr
+            .checked_add(1)
+            .ok_or_else(|| "LH5 header offset overflow".to_string())?;
+        loop {
+            let size_bytes = data
+                .get(ptr..ptr + 2)
+                .ok_or_else(|| "Truncated LH5 extended header".to_string())?;
+            ptr += 2;
+            let next_header_size = u16::from_le_bytes([size_bytes[0], size_bytes[1]]) as usize;
+            if next_header_size == 0 {
+                break;
+            }
+            ptr = ptr
+                .checked_add(next_header_size)
+                .ok_or_else(|| "LH5 extended header offset overflow".to_string())?;
+            if ptr > data.len() {
+                return Err("LH5 extended header exceeds file size".into());
+            }
+        }
+    }
+
+    if ptr >= data.len() {
+        return Err("LH5 payload is missing".into());
+    }
+    let available = data.len() - ptr;
+    let packed_size = packed_size.min(available);
+    let mut out = vec![0; original_size];
+    let mut decoder = Lh5Decoder::new(&data[ptr..ptr + packed_size]);
+    decoder
+        .fill_buffer(&mut out)
+        .map_err(|err| format!("YM LH5 compatibility decode failed: {err}"))?;
+    Ok(out)
+}
+
 fn repair_lzh_level0_header_checksum(data: &[u8]) -> Option<Vec<u8>> {
     if data.len() < 22 || data.get(2..5) != Some(b"-lh") || data.get(6) != Some(&b'-') {
         return None;
@@ -750,21 +815,23 @@ fn is_lzh_compressed(data: &[u8]) -> bool {
         return false;
     }
     let header_size = data[0] as usize;
-    header_size != 0
-        && data.len() >= 22 + header_size
-        && &data[2..7] == b"-lh5-"
+    header_size != 0 && data.len() >= 22 + header_size && &data[2..7] == b"-lh5-"
 }
 
 fn read_be32(data: &[u8], ptr: &mut usize) -> Result<u32, String> {
     let end = ptr.saturating_add(4);
-    let bytes = data.get(*ptr..end).ok_or_else(|| "Truncated YM header".to_string())?;
+    let bytes = data
+        .get(*ptr..end)
+        .ok_or_else(|| "Truncated YM header".to_string())?;
     *ptr = end;
     Ok(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
 fn read_be16(data: &[u8], ptr: &mut usize) -> Result<u16, String> {
     let end = ptr.saturating_add(2);
-    let bytes = data.get(*ptr..end).ok_or_else(|| "Truncated YM header".to_string())?;
+    let bytes = data
+        .get(*ptr..end)
+        .ok_or_else(|| "Truncated YM header".to_string())?;
     *ptr = end;
     Ok(u16::from_be_bytes([bytes[0], bytes[1]]))
 }
@@ -788,7 +855,10 @@ fn read_nt_string(data: &[u8], ptr: &mut usize) -> Result<String, String> {
 
 fn build_track_text_lines(song: &YmSong) -> Vec<String> {
     let mut out = vec![
-        format!("Format: {}", std::str::from_utf8(&song.magic).unwrap_or("YM")),
+        format!(
+            "Format: {}",
+            std::str::from_utf8(&song.magic).unwrap_or("YM")
+        ),
         format!("Frames: {}", song.nb_frames),
         format!("Player rate: {} Hz", song.player_rate),
         format!("Clock rate: {} Hz", song.clock_rate),
@@ -821,7 +891,10 @@ fn build_tracker_monitor_lines(song: &YmSong, frame_cursor: usize, rows: usize) 
     let frame = frame_cursor.min(song.nb_frames.saturating_sub(1));
     let mut lines = vec![
         format!("Frame: {} / {}", frame + 1, song.nb_frames),
-        format!("Rate: {} Hz  Clock: {} Hz", song.player_rate, song.clock_rate),
+        format!(
+            "Rate: {} Hz  Clock: {} Hz",
+            song.player_rate, song.clock_rate
+        ),
         format!("Loop frame: {}", song.loop_frame),
         String::new(),
     ];
@@ -831,10 +904,7 @@ fn build_tracker_monitor_lines(song: &YmSong, frame_cursor: usize, rows: usize) 
         let b = a + 1;
         lines.push(format!(
             "R{:02}:{:02X}  R{:02}:{:02X}",
-            a,
-            song.reg_frames[a][frame],
-            b,
-            song.reg_frames[b][frame]
+            a, song.reg_frames[a][frame], b, song.reg_frames[b][frame]
         ));
     }
 
